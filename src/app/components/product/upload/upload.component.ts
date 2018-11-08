@@ -6,34 +6,47 @@ import { ProductService } from 'src/app/services/product.service';
 @Component({
   selector: 'app-upload',
   templateUrl: './upload.component.html',
-  styleUrls: ['./upload.component.scss']
+  styleUrls: ['./upload.component.scss'],
 })
 export class UploadComponent implements OnInit {
   nameFile = '';
   typeFile: string;
-  isLogin = false;
+  isLogin: boolean;
   token;
+  isLoad: boolean;
+  error: string;
+  products: any[];
   constructor(
     private tokenService: TokenJwtService,
-    private productService: ProductService
+    private productService: ProductService,
   ) {}
 
   ngOnInit() {}
   getToken(user: string, password: string) {
-    this.tokenService.getTokenJWT(user, password).subscribe(data => {
-      this.token = data.token;
-      this.isLogin = true;
-    });
+    this.isLogin = false;
+    this.tokenService.getTokenJWT(user, password).subscribe(
+      data => {
+        console.log(data);
+        this.token = data.token;
+        this.isLogin = true;
+      },
+      error => {
+        this.error = 'Fallo login';
+      },
+    );
   }
   postProduct(data: any[]) {
-    this.productService
-      .postProducts(data, this.token)
-      .subscribe(res => console.log(res));
+    this.productService.postProducts(data, this.token).subscribe(res => {
+      this.products = res.create;
+      console.log(res);
+      this.isLoad = true;
+    });
   }
   link() {
     const input = document.getElementById('file1').click();
   }
   fileChangeEvent(event): void {
+    this.isLoad = false;
     console.log('event', event);
     // const file = event.target.files[0];
     const name: string = event.target.files.item(0).name;
@@ -73,7 +86,7 @@ export class UploadComponent implements OnInit {
       // doc https://github.com/SheetJS/js-xlsx#utility-functions
       const dataRows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {
         header: 1,
-        defval: ''
+        defval: '',
       });
       console.log('dataRows', dataRows);
       dataRows.forEach((row: Array<any>, numRow) => {
@@ -108,8 +121,8 @@ export class UploadComponent implements OnInit {
       product['meta_data'] = [
         {
           key: '_enable_role_based_price',
-          value: '1'
-        }
+          value: '1',
+        },
       ];
       // value de rol
       const value = {};
@@ -124,7 +137,7 @@ export class UploadComponent implements OnInit {
       // crar arr de los valores
       product['meta_data'].push({
         key: '_role_based_price',
-        value: value
+        value: value,
       });
       return product;
     });

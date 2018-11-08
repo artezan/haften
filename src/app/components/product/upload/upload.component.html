@@ -1,22 +1,26 @@
 <div class="container">
   <ng-container *ngIf="isLogin; then thenTemplate; else elseTemplate"></ng-container>
   <ng-template #thenTemplate>
-
-    <input id="file1" accept=".xlsx,xls" name="file1" type="file" hidden (change)="fileChangeEvent($event)">
-    <button (click)="link()" type="button" class="btn btn-outline-primary">
-      Subir
-      <i class="fas fa-cloud-upload-alt"></i>
-    </button>
-    <span *ngIf="typeFile">
-      <h5>
-        <b>Nombre de Hoja</b> {{nameFile}}
-      </h5>
-      <h5>
-        <b>Tipo</b> {{typeFile}}
-      </h5>
-    </span>
+    <div class="w-25">
+      <h5>Subir Archivo</h5>
+      <input id="file1" accept=".xlsx,xls" name="file1" type="file" hidden (change)="fileChangeEvent($event)">
+      <button (click)="link()" type="button" class="btn btn-outline-primary">
+        {{isLoad
+        === false ? 'Subiendo...':'Subir' }}
+        <i class="fas fa-cloud-upload-alt"></i>
+      </button>
+      <br>
+      <ul *ngIf="isLoad" class="list-group">
+        <li class="list-group-item"> # de Productos {{products.length}}</li>
+        <li class="list-group-item"> <b>Nombre de Hoja</b> {{nameFile}} </li>
+        <li class="list-group-item"> <b>Tipo</b> {{typeFile}}</li>
+      </ul>
+    </div>
   </ng-template>
   <ng-template #elseTemplate>
+    <div *ngIf="error && isLogin === false" class="alert alert-danger" role="alert">
+      {{error}}
+    </div>
     <div class="w-25">
       <div class="form-group">
         <label for="exampleInputEmail1">Usuario</label>
@@ -26,7 +30,8 @@
         <label for="exampleInputPassword1">Password</label>
         <input type="password" class="form-control" #password placeholder="Password">
       </div>
-      <button class="btn btn-primary" (click)="getToken(user.value, password.value)">Ingresar</button>
+      <button class="btn btn-primary" (click)="getToken(user.value, password.value)" [disabled]="isLogin === false && !error">{{isLogin
+        === false && !error ? 'Ingresando...':'Ingresar' }}</button>
     </div>
 
   </ng-template>
