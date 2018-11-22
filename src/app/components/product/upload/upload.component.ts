@@ -2,6 +2,12 @@ import { Component, OnInit } from '@angular/core';
 import * as XLSX from 'xlsx';
 import { TokenJwtService } from 'src/app/services/token-jwt.service';
 import { ProductService } from 'src/app/services/product.service';
+interface Categories {
+  name?: string;
+  id?: string;
+  parentId?: string;
+  parentName?: string;
+}
 
 @Component({
   selector: 'app-upload',
@@ -11,11 +17,14 @@ import { ProductService } from 'src/app/services/product.service';
 export class UploadComponent implements OnInit {
   nameFile = '';
   typeFile: string;
-  isLogin: boolean;
+  isLogin = true;
+  // isLogin: boolean;
   token;
   isLoad: boolean;
   error: string;
   products: any[];
+  acctionsSys = 'Esperando archivo 📁';
+  timeUpload = 0;
   constructor(
     private tokenService: TokenJwtService,
     private productService: ProductService,
@@ -26,7 +35,7 @@ export class UploadComponent implements OnInit {
     this.isLogin = false;
     this.tokenService.getTokenJWT(user, password).subscribe(
       data => {
-        console.log(data);
+        // console.log(data);
         this.token = data.token;
         this.isLogin = true;
       },
@@ -36,9 +45,15 @@ export class UploadComponent implements OnInit {
     );
   }
   postProduct(data: any[]) {
+    const timeNow = performance.now();
+    this.acctionsSys = 'Subiendo productos transformados, espere... ⬆ ☁️ ';
     this.productService.postProducts(data, this.token).subscribe(res => {
       this.products = res.create;
       console.log(res);
+      this.acctionsSys = 'Productos subidos con éxito 👍 !!! ';
+      const timeLater = performance.now();
+      console.log('Tiempo ms', timeLater - timeNow);
+      this.timeUpload = (timeLater - timeNow) / 60000;
       this.isLoad = true;
     });
   }
@@ -47,14 +62,13 @@ export class UploadComponent implements OnInit {
   }
   fileChangeEvent(event): void {
     this.isLoad = false;
-    console.log('event', event);
     // const file = event.target.files[0];
     const name: string = event.target.files.item(0).name;
     const typeFile: string = name.substring(name.indexOf('.') + 1);
     this.typeFile = typeFile;
     this.excelFile(event);
   }
-  // Excel a JSON
+  // Leer Excel
   private excelFile(evt: any): void {
     /* wire up file reader */
     const target: DataTransfer = <DataTransfer>evt.target;
@@ -62,15 +76,14 @@ export class UploadComponent implements OnInit {
       throw new Error('Cannot use multiple files');
     }
     const reader: FileReader = new FileReader();
-    reader.onload = (e: any) => {
+    reader.onload = async (e: any) => {
       /* read workbook */
       const bstr: string = e.target.result;
       const wb: XLSX.WorkBook = XLSX.read(bstr, { type: 'binary' });
       // pasar de excel a json
       const dataExcelJson = this.exelToJson(wb);
-      console.log(dataExcelJson);
       this.nameFile = dataExcelJson[0].name;
-      const products = this.transformData(dataExcelJson[0].data);
+      const products = await this.transformData(dataExcelJson[0].data);
       console.log('products', products);
 
       // subir datos
@@ -88,6 +101,7 @@ export class UploadComponent implements OnInit {
         header: 1,
         defval: '',
       });
+      this.acctionsSys = 'Generando JSON de Excel ...';
       console.log('dataRows', dataRows);
       dataRows.forEach((row: Array<any>, numRow) => {
         const obj = {};
@@ -115,32 +129,131 @@ export class UploadComponent implements OnInit {
     });
     return arrJson;
   }
-  private transformData(data: {}[]) {
+  private async transformData(data: {}[]) {
+    const c = data.map(p => p['categories']);
+    const categories = await this.addCategories(c);
+    this.acctionsSys = 'Categorias Creadas 😃';
+    console.log('categories', categories);
     const products = data.map(product => {
       // crea meta data con valor inicial
-      product['meta_data'] = [
-        {
-          key: '_enable_role_based_price',
-          value: '1',
-        },
-      ];
-      // value de rol
-      const value = {};
-      Object.keys(product).forEach(key => {
-        // busca _role_ para ver usuario y su valor
-        const pos = key.indexOf('_role_');
-        if (pos !== -1) {
-          // crea obj
-          value[key.replace('_role_', '')] = { regular_price: product[key] };
-        }
-      });
-      // crar arr de los valores
-      product['meta_data'].push({
-        key: '_role_based_price',
-        value: value,
-      });
-      return product;
+      // this.setCategories(product);
+      return this.setRolPriceAndCategories(product, categories);
     });
     return products;
+  }
+
+  private setRolPriceAndCategories(product: {}, categories: Categories[]) {
+    product['meta_data'] = [
+      {
+        key: '_enable_role_based_price',
+        value: '1',
+      },
+    ];
+    // value de rol
+    const value = {};
+    Object.keys(product).forEach(key => {
+      // busca _role_ para ver usuario y su valor
+      const pos = key.indexOf('_role_');
+      if (pos !== -1) {
+        // crea obj
+        value[key.replace('_role_', '')] = { regular_price: product[key] };
+      }
+    });
+    // crar arr de los valores
+    product['meta_data'].push({
+      key: '_role_based_price',
+      value: value,
+    });
+    // setea id de categoria
+    product['categories'] = this.setCategories(
+      product['categories'],
+      categories,
+    );
+    // setea imgs
+    product['images'] = product['images'].split(',').map(s => {
+      return { src: s };
+    });
+    return product;
+  }
+  private setCategories(
+    str: string,
+    categories: Categories[],
+  ): { id: string }[] {
+    const ids: { id: string }[] = [];
+    if (str.trim() !== '') {
+      const numOfParent = str.indexOf('>');
+      if (numOfParent !== -1) {
+        const parent = str.substring(0, numOfParent).trim();
+        const child = str.substring(numOfParent + 1).trim();
+        if (parent) {
+          ids.push({
+            id: categories.find(c => c.name === parent).id,
+          });
+        }
+        if (child) {
+          ids.push({
+            id: categories.find(c => c.name === child).id,
+          });
+        }
+      } else {
+        const parent = str.trim();
+        ids.push({
+          id: categories.find(c => c.name === parent).id,
+        });
+      }
+    }
+    return ids;
+  }
+  public async addCategories(categories: string[]): Promise<Categories[]> {
+    this.acctionsSys = 'Categorias detectadas...';
+    const promise = new Promise<Categories[]>((resolve, reject) => {
+      const arr: Categories[] = [];
+      categories.forEach(str => {
+        if (str.trim() !== '') {
+          // parents
+          const numOfParent = str.indexOf('>');
+          if (numOfParent !== -1) {
+            const parent = str.substring(0, numOfParent).trim();
+            const child = str.substring(numOfParent + 1).trim();
+            const isParent = arr.some(c => c.name === parent);
+            const isChild = arr.some(c => c.name === child);
+            if (isParent === false && isChild === false) {
+              arr.push({ name: parent }, { name: child, parentName: parent });
+            } else if (isParent === true && isChild === false) {
+              arr.push({ name: child, parentName: parent });
+            }
+          } else {
+            const isFinded = arr.some(c => c.name === str.trim());
+            if (isFinded === false) {
+              arr.push({ name: str.trim() });
+            }
+          }
+        }
+      });
+      const parentsCategories = arr.filter(c => c.parentName === undefined);
+      this.productService
+        .postCategories(parentsCategories)
+        .subscribe((parents: Categories[]) => {
+          this.acctionsSys = 'Creando categorias Padres...';
+          console.log('parentss', parents);
+          const childCategories = arr
+            .filter(c => c.parentName)
+            .map(c => {
+              const child = {};
+              child['parent'] = parents.find(p => c.parentName === p.name).id;
+              child['name'] = c.name;
+              return child;
+            });
+          this.acctionsSys = 'Creando categorias Hijas...';
+          console.log('childCategories', childCategories);
+          this.productService
+            .postCategories(childCategories)
+            .subscribe(childs => {
+              resolve([...parents, ...childs]);
+            });
+        });
+    });
+    const result = await promise;
+    return result;
   }
 }
