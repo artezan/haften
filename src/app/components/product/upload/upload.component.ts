@@ -7,6 +7,7 @@ interface Categories {
   id?: string;
   parentId?: string;
   parentName?: string;
+  level?: number;
 }
 
 @Component({
@@ -17,7 +18,7 @@ interface Categories {
 export class UploadComponent implements OnInit {
   nameFile = '';
   typeFile: string;
-  isLogin = true;
+  isLogin;
   // isLogin: boolean;
   token;
   isLoad: boolean;
@@ -179,26 +180,19 @@ export class UploadComponent implements OnInit {
     str: string,
     categories: Categories[],
   ): { id: string }[] {
-    const ids: { id: string }[] = [];
+    let ids: { id: string }[] = [];
     if (str.trim() !== '') {
       const numOfParent = str.indexOf('>');
       if (numOfParent !== -1) {
-        const parent = str.substring(0, numOfParent).trim();
-        const child = str.substring(numOfParent + 1).trim();
-        if (parent) {
-          ids.push({
-            id: categories.find(c => c.name === parent).id,
-          });
-        }
-        if (child) {
-          ids.push({
-            id: categories.find(c => c.name === child).id,
-          });
-        }
+        const arrStr = str.split('>');
+        ids = arrStr.map(s => {
+          const category = s.trim();
+          return { id: categories.find(c => c.name === category).id };
+        });
       } else {
         const parent = str.trim();
         ids.push({
-          id: categories.find(c => c.name === parent).id,
+          id: categories.find(c => c && c.name === parent).id,
         });
       }
     }
@@ -206,52 +200,75 @@ export class UploadComponent implements OnInit {
   }
   public async addCategories(categories: string[]): Promise<Categories[]> {
     this.acctionsSys = 'Categorias detectadas...';
-    const promise = new Promise<Categories[]>((resolve, reject) => {
+    const promise = new Promise<Categories[]>(async (resolve, reject) => {
       const arr: Categories[] = [];
       categories.forEach(str => {
         if (str.trim() !== '') {
           // parents
           const numOfParent = str.indexOf('>');
           if (numOfParent !== -1) {
-            const parent = str.substring(0, numOfParent).trim();
-            const child = str.substring(numOfParent + 1).trim();
-            const isParent = arr.some(c => c.name === parent);
-            const isChild = arr.some(c => c.name === child);
-            if (isParent === false && isChild === false) {
-              arr.push({ name: parent }, { name: child, parentName: parent });
-            } else if (isParent === true && isChild === false) {
-              arr.push({ name: child, parentName: parent });
-            }
+            const arrCategories = str.split('>');
+            arrCategories.forEach((arrStr, i) => {
+              const category = arrStr.trim();
+              if (i === 0) {
+                const isFinded = arr.some(c => c.name === category);
+                if (isFinded === false) {
+                  arr.push({ name: category, level: i + 1 });
+                }
+              } else {
+                const parent = arrCategories[i - 1].trim();
+                const child = category;
+                const isParent = arr.some(c => c.name === parent);
+                const isChild = arr.some(c => c.name === child);
+                if (isParent === false) {
+                  arr.push({ name: parent, level: i + 1 });
+                }
+                if (isChild === false) {
+                  console.log('>', arrStr);
+                  arr.push({ name: child, parentName: parent, level: i + 1 });
+                }
+              }
+            });
           } else {
             const isFinded = arr.some(c => c.name === str.trim());
             if (isFinded === false) {
-              arr.push({ name: str.trim() });
+              arr.push({ name: str.trim(), level: 1 });
             }
           }
         }
       });
-      const parentsCategories = arr.filter(c => c.parentName === undefined);
-      this.productService
-        .postCategories(parentsCategories)
-        .subscribe((parents: Categories[]) => {
-          this.acctionsSys = 'Creando categorias Padres...';
-          console.log('parentss', parents);
-          const childCategories = arr
-            .filter(c => c.parentName)
-            .map(c => {
+      console.log('arr', arr);
+      const loops = Array.from(
+        Array(Math.max(...arr.map(c => c.level))).keys(),
+      );
+      console.log(loops);
+      const results = [];
+      this.acctionsSys = 'Creando categorias Padres...';
+      for (let index = 0; index < loops.length; index++) {
+        const level = loops[index] + 1;
+        const catOfLevel = arr
+          .filter(c => c.level === level)
+          .map(cf => {
+            if (level === 1) {
+              const parent = {};
+              parent['name'] = cf.name;
+              return parent;
+            } else {
               const child = {};
-              child['parent'] = parents.find(p => c.parentName === p.name).id;
-              child['name'] = c.name;
+              child['parent'] = results[index - 1].find(
+                p => cf.parentName === p.name,
+              ).id;
+              child['name'] = cf.name;
               return child;
-            });
-          this.acctionsSys = 'Creando categorias Hijas...';
-          console.log('childCategories', childCategories);
-          this.productService
-            .postCategories(childCategories)
-            .subscribe(childs => {
-              resolve([...parents, ...childs]);
-            });
-        });
+            }
+          });
+        results[index] = await this.productService
+          .postCategories(catOfLevel, this.token)
+          .toPromise();
+        this.acctionsSys = `Creando categorias Hijas nivel ${level}...`;
+      }
+      console.log('results', results);
+      resolve([].concat.apply([], results));
     });
     const result = await promise;
     return result;

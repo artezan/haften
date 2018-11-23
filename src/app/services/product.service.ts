@@ -40,12 +40,22 @@ export class ProductService {
       body,
     );
   }
-  public postCategories(data: any[]): Observable<any> {
-    console.log(data);
+  public postCategories(data: any[], token?): Observable<any> {
+    const headers = new HttpHeaders({
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json;',
+    });
+    console.log('dataPost', data);
     return this.http
-      .post(URL_SERVER + '/wc/v2/products/categories/batch?' + KEYS_WOO, {
-        create: data,
-      })
+      .post(
+        URL_SERVER + '/wc/v2/products/categories/batch?' + KEYS_WOO,
+        {
+          create: data,
+        },
+        {
+          headers: headers,
+        },
+      )
       .pipe(map((res: any) => res.create));
   }
 }

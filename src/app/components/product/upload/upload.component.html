@@ -1,7 +1,7 @@
 <div class="container">
   <ng-container *ngIf="isLogin; then thenTemplate; else elseTemplate"></ng-container>
   <ng-template #thenTemplate>
-    <div class="w-25">
+    <div class="col col-lg-4">
       <h5>Subir Archivo</h5>
       <input id="file1"
              accept=".xlsx,xls"
