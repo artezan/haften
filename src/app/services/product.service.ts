@@ -58,4 +58,16 @@ export class ProductService {
       )
       .pipe(map((res: any) => res.create));
   }
+  public getCategories(token): Observable<any> {
+    const headers = new HttpHeaders({
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json;',
+    });
+    return this.http.get(
+      URL_SERVER + '/wc/v2/products/categories?' + KEYS_WOO,
+      {
+        headers: headers,
+      },
+    );
+  }
 }

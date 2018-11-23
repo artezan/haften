@@ -243,7 +243,6 @@ export class UploadComponent implements OnInit {
       );
       console.log(loops);
       const results = [];
-      this.acctionsSys = 'Creando categorias Padres...';
       for (let index = 0; index < loops.length; index++) {
         const level = loops[index] + 1;
         const catOfLevel = arr
@@ -262,13 +261,44 @@ export class UploadComponent implements OnInit {
               return child;
             }
           });
-        results[index] = await this.productService
+        results[index] = await this.checkCategories(<any>catOfLevel);
+        /*   results[index] = await this.productService
           .postCategories(catOfLevel, this.token)
-          .toPromise();
+          .toPromise(); */
         this.acctionsSys = `Creando categorias Hijas nivel ${level}...`;
       }
       console.log('results', results);
       resolve([].concat.apply([], results));
+    });
+    const result = await promise;
+    return result;
+  }
+  async checkCategories(categories: { name: string }[]) {
+    const promise = new Promise<Categories[]>(async (resolve, reject) => {
+      const finalCategories: Categories[] = [];
+      const addCategories: Categories[] = [];
+      this.productService
+        .getCategories(this.token)
+        .subscribe((cat: Categories[]) => {
+          categories.forEach(c => {
+            const res = cat.find(item => item.name === c.name);
+            if (res) {
+              finalCategories.push(res);
+            } else {
+              addCategories.push(c);
+            }
+          });
+          if (addCategories.length > 0) {
+            this.acctionsSys = 'Creando categorias';
+            this.productService
+              .postCategories(addCategories, this.token)
+              .subscribe(newCat => {
+                resolve([...newCat, ...finalCategories]);
+              });
+          } else {
+            resolve([...finalCategories]);
+          }
+        });
     });
     const result = await promise;
     return result;
