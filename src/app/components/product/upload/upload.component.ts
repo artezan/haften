@@ -1,7 +1,9 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, Attribute } from '@angular/core';
 import * as XLSX from 'xlsx';
 import { TokenJwtService } from 'src/app/services/token-jwt.service';
 import { ProductService } from 'src/app/services/product.service';
+import { SocketIoService } from 'src/app/services/socket-io.service';
+import { map } from 'rxjs/operators';
 interface Categories {
   name?: string;
   id?: string;
@@ -26,17 +28,25 @@ export class UploadComponent implements OnInit {
   products: any[];
   acctionsSys = 'Esperando archivo 📁';
   timeUpload = 0;
+  premium = true;
+  newProductsUpload = [];
+  media = [];
+  errorUploads = [];
   constructor(
     private tokenService: TokenJwtService,
     private productService: ProductService,
   ) {}
 
-  ngOnInit() {}
+  ngOnInit() {
+    /*  if (this.premium) {
+      this.getWebhook();
+    } */
+  }
   getToken(user: string, password: string) {
     this.isLogin = false;
     this.tokenService.getTokenJWT(user, password).subscribe(
       data => {
-        // console.log(data);
+        console.log(data);
         this.token = data.token;
         this.isLogin = true;
       },
@@ -45,23 +55,49 @@ export class UploadComponent implements OnInit {
       },
     );
   }
+  /*   getWebhook() {
+    this.socketIOService.onNewProduct().subscribe((newProduct: any) => {
+      console.log('newProduct', newProduct);
+      this.newProductsUpload = newProduct.data;
+    });
+  } */
   postProduct(data: any[]) {
     const timeNow = performance.now();
     this.acctionsSys = 'Subiendo productos transformados, espere... ⬆ ☁️ ';
-    this.productService.postProducts(data, this.token).subscribe(res => {
+    this.productService.postProducts(data, this.token).subscribe(async res => {
       this.products = res.create;
       console.log(res);
-      this.acctionsSys = 'Productos subidos con éxito 👍 !!! ';
-      const timeLater = performance.now();
-      console.log('Tiempo ms', timeLater - timeNow);
-      this.timeUpload = (timeLater - timeNow) / 60000;
-      this.isLoad = true;
+      const variableProds = this.products.filter(p => p.type === 'variable');
+      if (variableProds.length > 0) {
+        // crear precios con atributos
+        const end = await this.setPriceVariable(variableProds, data);
+        if (end) {
+          this.acctionsSys = 'Productos subidos con éxito 👍 !!! ';
+          const timeLater = performance.now();
+          console.log('Tiempo ms', timeLater - timeNow);
+          this.timeUpload = (timeLater - timeNow) / 60000;
+          this.isLoad = true;
+        }
+      } else {
+        this.acctionsSys = 'Productos subidos con éxito 👍 !!! ';
+        const timeLater = performance.now();
+        console.log('Tiempo ms', timeLater - timeNow);
+        this.timeUpload = (timeLater - timeNow) / 60000;
+        this.isLoad = true;
+      }
+      const err = res.create.filter(c => c.error);
+      if (err.length > 0) {
+        this.acctionsSys = 'Error 🔥 !!! ';
+
+        this.errorUploads = err;
+      }
     });
   }
   link() {
     const input = document.getElementById('file1').click();
   }
-  fileChangeEvent(event): void {
+  async fileChangeEvent(event): Promise<void> {
+    this.media = await this.getImgIdbyName();
     this.isLoad = false;
     // const file = event.target.files[0];
     const name: string = event.target.files.item(0).name;
@@ -92,6 +128,7 @@ export class UploadComponent implements OnInit {
     };
     reader.readAsBinaryString(target.files[0]);
   }
+  // llega archivo
   private exelToJson(wb: XLSX.WorkBook): Array<{ data: any[]; name: string }> {
     const arrJson = [];
     let columsNames: string[];
@@ -130,20 +167,54 @@ export class UploadComponent implements OnInit {
     });
     return arrJson;
   }
+  // datos para transformar
   private async transformData(data: {}[]) {
+    // START categorias
     const c = data.map(p => p['categories']);
     const categories = await this.addCategories(c);
     this.acctionsSys = 'Categorias Creadas 😃';
     console.log('categories', categories);
+    // end
+    // START Atributos
+    const dataAtt = data.filter(d => d['type'] === 'variable');
+    let attributes;
+    if (dataAtt.length > 0) {
+      console.log('dataAtt', dataAtt);
+      this.acctionsSys = 'Atributos detectados';
+      attributes = await this.addAttributes(<any>dataAtt);
+      console.log('attributes', attributes);
+      this.acctionsSys = 'Atributos creados 😃';
+    }
+    // END
+    // START Tags
+    const tags = data.map(d => <string>d['tags']);
+    let listTags;
+    if (tags.length > 0) {
+      console.log('tag', tags);
+      this.acctionsSys = 'Etiquetas detectadas';
+      listTags = await this.checkTags(this.converToArray(tags));
+      this.acctionsSys = 'Etiquetas creadas 😃';
+    }
+    // end
     const products = data.map(product => {
       // crea meta data con valor inicial
       // this.setCategories(product);
-      return this.setRolPriceAndCategories(product, categories);
+      return this.setRolPriceAndCategories(
+        product,
+        categories,
+        attributes,
+        listTags,
+      );
     });
     return products;
   }
-
-  private setRolPriceAndCategories(product: {}, categories: Categories[]) {
+  // mapear para que coincida con products model
+  private setRolPriceAndCategories(
+    product: {},
+    categories: Categories[],
+    attributes: any[],
+    tags: any[],
+  ) {
     product['meta_data'] = [
       {
         key: '_enable_role_based_price',
@@ -161,19 +232,63 @@ export class UploadComponent implements OnInit {
       }
     });
     // crar arr de los valores
-    product['meta_data'].push({
-      key: '_role_based_price',
-      value: value,
-    });
+    if (product['type'] === 'simple') {
+      product['meta_data'].push({
+        key: '_role_based_price',
+        value: value,
+      });
+    }
     // setea id de categoria
-    product['categories'] = this.setCategories(
-      product['categories'],
-      categories,
-    );
+    if (categories) {
+      product['categories'] = this.setCategories(
+        product['categories'],
+        categories,
+      );
+    }
     // setea imgs
-    product['images'] = product['images'].split(',').map(s => {
-      return { src: s };
+    product['images'] = product['images'].split(',').map((s: string) => {
+      const img = this.media.find(
+        m =>
+          m.source_url.substring(m.source_url.lastIndexOf('/') + 1) ===
+          s.trim(),
+      );
+      // return { src: s, name: s.substring(s.lastIndexOf('/') + 1) };
+      if (img) {
+        return { id: img.id };
+      }
     });
+    // setea atributos y terms
+    if (attributes) {
+      product['attributes'] = product['attributes']
+        .split('|')
+        .map((a: string, i: number) => {
+          const find = attributes.find(att => att.name === a.trim());
+          if (find) {
+            return {
+              id: find.id,
+              visible: true,
+              variation: true,
+              options: product['terms']
+                .split('|')
+                [i].split(',')
+                .map(item => item.trim()),
+            };
+          }
+        });
+    }
+    // setea tags
+    if (tags) {
+      product['tags'] = product['tags'].split(',').map(item => {
+        console.log(tags);
+        const find = tags.find(t => t.name === item.trim());
+        if (find) {
+          return {
+            id: find.id,
+          };
+        }
+      });
+    }
+
     return product;
   }
   private setCategories(
@@ -301,6 +416,292 @@ export class UploadComponent implements OnInit {
         });
     });
     const result = await promise;
+    return result;
+  }
+  // atributos en productos variables
+  async addAttributes(products: { attributes: string; terms: string }[]) {
+    let variation = [];
+    variation = products.map(product => {
+      const newVariation = [];
+      product.attributes
+        .split('|')
+        .map(item => item.trim())
+        .forEach((att, i) => {
+          const isAtt = variation.some(v => v.name === att);
+          if (!isAtt) {
+            newVariation.push({
+              name: att,
+              terms: product.terms
+                .split('|')
+                [i].split(',')
+                .map(item => item.trim()),
+            });
+          }
+        });
+      return newVariation;
+    });
+    const attributes = await this.checkAttribute(variation[0]);
+
+    for (const att of attributes) {
+      const find = variation[0].find(p => p.name === att.name);
+      const terms = await this.checkTerms(att.id, find.terms);
+      console.log('terms', terms);
+      this.acctionsSys = 'terms creados';
+    }
+
+    return attributes;
+  }
+  // solo productos variables
+  async checkAttribute(attributes: { name: string; terms: string[] }[]) {
+    const promise = new Promise<any[]>(async (resolve, reject) => {
+      const finalAtt = [];
+      const addAtt = [];
+      this.productService.getAttributes(this.token).subscribe((atts: any[]) => {
+        attributes.forEach(a => {
+          const res = atts.find(item => item.name === a.name);
+          if (res) {
+            finalAtt.push(res);
+          } else {
+            addAtt.push({ name: a.name });
+          }
+        });
+        if (addAtt.length > 0) {
+          this.acctionsSys = 'Creando atributos';
+          this.productService
+            .postAttributes(addAtt, this.token)
+            .subscribe(newCat => {
+              console.log('newAtt', newCat);
+              resolve([...newCat, ...finalAtt]);
+            });
+        } else {
+          resolve([...finalAtt]);
+        }
+      });
+    });
+    const result = await promise;
+    return result;
+  }
+  private async checkTerms(attributeId: string, terms: string[]) {
+    console.log('terms', terms);
+    console.log('attributeId', attributeId);
+    const promise = new Promise<any[]>(async (resolve, reject) => {
+      const finalAtt = [];
+      const addAtt: { name: string }[] = [];
+      this.productService
+        .getTerms(attributeId, this.token)
+        .subscribe((atts: any[]) => {
+          terms.forEach(term => {
+            const res = atts.find(item => item.name === term);
+            if (res) {
+              finalAtt.push(res);
+            } else {
+              addAtt.push({ name: term });
+            }
+          });
+          if (addAtt.length > 0) {
+            this.acctionsSys = 'Creando terms';
+            this.productService
+              .postTerms(attributeId, addAtt, this.token)
+              .subscribe(newCat => {
+                resolve([...newCat, ...finalAtt]);
+              });
+          } else {
+            resolve([...finalAtt]);
+          }
+        });
+    });
+    const result = await promise;
+    return result;
+  }
+  private async setPriceVariable(
+    products: any[],
+    data: any[],
+  ): Promise<boolean> {
+    console.log(products);
+    // crear productos a subir
+    const prodVar = products.map(product => {
+      const prodExcel = data.find(d => d['sku'] === product.sku);
+      if (prodExcel) {
+        const obj = prodExcel['regular_price'].split(',').map((str: string) => {
+          const attributes = str
+            .substring(str.indexOf('[') + 1, str.indexOf(']'))
+            .split('|')
+            .map(item => item.trim())
+            .map(option => {
+              return {
+                id: product.attributes.find(a =>
+                  a.options.some(opt => opt === option),
+                ).id,
+                option: option,
+              };
+            });
+          const price = str.substring(str.indexOf(':') + 1);
+          const metadata = this.setMetaData(prodExcel, str);
+          const img = this.setImg(
+            prodExcel,
+            str
+              .substring(str.indexOf('[') + 1, str.indexOf(']'))
+              .replace(' ', ''),
+            product.images,
+          );
+          console.log('img', img);
+          // este es el prod hijo -->
+          if (img) {
+            return {
+              regular_price: +price.trim(),
+              attributes: attributes,
+              meta_data: metadata,
+              image: { id: img },
+            };
+          } else {
+            return {
+              regular_price: +price.trim(),
+              attributes: attributes,
+              meta_data: metadata,
+            };
+          }
+        });
+        console.log('obj', obj);
+        obj['productId'] = product.id;
+        return obj;
+      }
+    });
+    this.acctionsSys = 'Asignando precios a productos variables, espere ...';
+    console.log('prodVar', prodVar);
+    for (const variations of prodVar) {
+      /*  variations = variations.map(v =>
+        this.setRolPriceAndCategories(v, undefined, undefined),
+      ); */
+      const res = await this.productService
+        .postProductVariation(variations.productId, variations, this.token)
+        .toPromise();
+      console.log('res', res);
+    }
+    return true;
+  }
+  setMetaData(product: {}, strOptions: string) {
+    let meta_data;
+    meta_data = [
+      {
+        key: '_enable_role_based_price',
+        value: '1',
+      },
+    ];
+    // value de rol
+    const value = {};
+    Object.keys(product).forEach(key => {
+      // busca _role_ para ver usuario y su valor
+      const pos = key.indexOf('_role_');
+      if (pos !== -1) {
+        // crea obj
+        value[key.replace('_role_', '')] = {
+          regular_price: this.getPriceRolVar(product[key], strOptions),
+        };
+      }
+    });
+    // crar arr de los valores
+    meta_data.push({
+      key: '_role_based_price',
+      value: value,
+    });
+
+    return meta_data;
+  }
+  private getPriceRolVar(keyValue: string, strOptions: string): number {
+    this.acctionsSys = `Asignando precios 💰`;
+    const strOptionsProd = strOptions
+      .substring(strOptions.indexOf('[') + 1, strOptions.indexOf(']'))
+      .replace(' ', '');
+    const price = keyValue.split(',').find((str: string) => {
+      const valuesRol = str
+        .substring(str.indexOf('[') + 1, str.indexOf(']'))
+        .replace(' ', '');
+
+      if (valuesRol === strOptionsProd) {
+        return true;
+      }
+    });
+    if (price) {
+      console.log(price);
+      return +price.substring(price.indexOf(':') + 1);
+    }
+  }
+  private setImg(product: {}, productStr: string, arrImgs: any[]) {
+    this.acctionsSys = 'Subiendo Imagenes 🖼';
+    // value de rol
+    let value;
+    Object.keys(product).forEach(key => {
+      // busca images_variable para ver usuario y su valor
+      const pos = key.indexOf('images_variable');
+      if (pos !== -1) {
+        // crea obj
+        const arrStr = product[key].split(';');
+        const img: string = arrStr.find(
+          str =>
+            str
+              .substring(str.indexOf('[') + 1, str.indexOf(']'))
+              .replace(' ', '') === productStr,
+        );
+        if (img) {
+          value = img.substring(img.indexOf(':') + 1);
+          const imgUp = this.media.find(
+            m =>
+              m.source_url.substring(m.source_url.lastIndexOf('/') + 1) ===
+              value.trim(),
+          );
+          if (imgUp) {
+            value = imgUp.id;
+          }
+        }
+      }
+    });
+    return value;
+  }
+  private async getImgIdbyName() {
+    return await this.productService.getMedias(this.token).toPromise();
+  }
+  // tags
+  private converToArray(strArr: string[]): string[] {
+    let res: string[] = [];
+    for (const str of strArr) {
+      const arr = str.split(',').map(s => s);
+      if (arr.length) {
+        res = [...res, ...str.split(',').map(s => s.trim())];
+      } else {
+        res.push(str.trim());
+      }
+    }
+
+    return res;
+  }
+  private async checkTags(tags: string[]) {
+    console.log('tags input', tags);
+    const promise = new Promise<any[]>(async (resolve, reject) => {
+      const finalAtt = [];
+      const addAtt = [];
+      this.productService.getTags(this.token).subscribe((tagsApi: any[]) => {
+        tags.forEach(tag => {
+          const res = tagsApi.find(t => t.name === tag);
+          if (res) {
+            finalAtt.push(res);
+          } else {
+            addAtt.push({ name: tag });
+          }
+        });
+        if (addAtt.length > 0) {
+          this.acctionsSys = 'Creando Etiquetas ⛏';
+          this.productService
+            .postProductTags(addAtt, this.token)
+            .subscribe(newCat => {
+              resolve([...newCat, ...finalAtt]);
+            });
+        } else {
+          resolve([...finalAtt]);
+        }
+      });
+    });
+    const result = await promise;
+    console.log('tags on che', result);
     return result;
   }
 }
