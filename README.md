@@ -22,34 +22,11 @@ copiar la clave de `define('SECURE_AUTH_KEY' 'Clave');`
 
 pegar en archivo wp-config.php `define('JWT_AUTH_SECRET_KEY', 'Clave');`
 
-## **Verificar**
+---
 
-tuURL.com/wp-json
+## Excel
 
-```json
-namespaces: [
-"oembed/1.0",
-"jwt-auth/v1",
-"wp/v2"
-]
-```
-
-## obtener JWT
-
-http://theartezan.xyz/wp-json/jwt-auth/v1/token
-
-## Ejemplo de post
-
-Headers: `Authorization: Bearer "JWT"`
-
-body
-
-```json
-{
-  "title": "Postman3",
-  "content": "algo3"
-}
-```
+Tomar de Ejemplo los archivos adjuntos
 
 ---
 

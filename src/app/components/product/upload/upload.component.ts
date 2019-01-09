@@ -169,6 +169,7 @@ export class UploadComponent implements OnInit {
   }
   // datos para transformar
   private async transformData(data: {}[]) {
+    console.log(data);
     // START categorias
     const c = data.map(p => p['categories']);
     const categories = await this.addCategories(c);
@@ -176,9 +177,10 @@ export class UploadComponent implements OnInit {
     console.log('categories', categories);
     // end
     // START Atributos
+    const keys = Object.keys(data[0]);
     const dataAtt = data.filter(d => d['type'] === 'variable');
     let attributes;
-    if (dataAtt.length > 0) {
+    if (keys.some(key => key === 'type') && dataAtt.length > 0) {
       console.log('dataAtt', dataAtt);
       this.acctionsSys = 'Atributos detectados';
       attributes = await this.addAttributes(<any>dataAtt);
@@ -189,7 +191,7 @@ export class UploadComponent implements OnInit {
     // START Tags
     const tags = data.map(d => <string>d['tags']);
     let listTags;
-    if (tags.length > 0) {
+    if (keys.some(key => key === 'tags')) {
       console.log('tag', tags);
       this.acctionsSys = 'Etiquetas detectadas';
       listTags = await this.checkTags(this.converToArray(tags));
@@ -295,14 +297,21 @@ export class UploadComponent implements OnInit {
     str: string,
     categories: Categories[],
   ): { id: string }[] {
+    // tslint:disable-next-line:prefer-const
     let ids: { id: string }[] = [];
     if (str.trim() !== '') {
       const numOfParent = str.indexOf('>');
       if (numOfParent !== -1) {
         const arrStr = str.split('>');
-        ids = arrStr.map(s => {
-          const category = s.trim();
-          return { id: categories.find(c => c.name === category).id };
+        arrStr.forEach(s => {
+          if (s.indexOf(',') === -1) {
+            const category = s.trim();
+            ids.push({ id: categories.find(c => c.name === category).id });
+          } else {
+            s.split(',').forEach(cat => {
+              ids.push({ id: categories.find(c => c.name === cat.trim()).id });
+            });
+          }
         });
       } else {
         const parent = str.trim();
@@ -324,23 +333,61 @@ export class UploadComponent implements OnInit {
           if (numOfParent !== -1) {
             const arrCategories = str.split('>');
             arrCategories.forEach((arrStr, i) => {
-              const category = arrStr.trim();
-              if (i === 0) {
-                const isFinded = arr.some(c => c.name === category);
-                if (isFinded === false) {
-                  arr.push({ name: category, level: i + 1 });
-                }
+              const isMultiple = arrStr.indexOf(',');
+              if (isMultiple !== -1) {
+                const arrMultiple = arrStr.split(',');
+                arrMultiple.forEach((cat, ii) => {
+                  const category = cat.trim();
+                  if (i === 0) {
+                    const isFinded = arr.some(c => c.name === category);
+                    if (isFinded === false) {
+                      arr.push({ name: category, level: i + 1 });
+                    }
+                  } else {
+                    const parent = arrCategories[i - 1].trim();
+
+                    const child = category;
+                    const isParent = arr.some(c => c.name === parent);
+                    const isChild = arr.some(c => c.name === child);
+                    if (isParent === false) {
+                      arr.push({ name: parent, level: i + 1 });
+                    }
+                    if (isChild === false) {
+                      console.log('>', arrStr);
+                      arr.push({
+                        name: child,
+                        parentName: parent,
+                        level: i + 1,
+                      });
+                    }
+                  }
+                });
               } else {
-                const parent = arrCategories[i - 1].trim();
-                const child = category;
-                const isParent = arr.some(c => c.name === parent);
-                const isChild = arr.some(c => c.name === child);
-                if (isParent === false) {
-                  arr.push({ name: parent, level: i + 1 });
-                }
-                if (isChild === false) {
-                  console.log('>', arrStr);
-                  arr.push({ name: child, parentName: parent, level: i + 1 });
+                const category = arrStr.trim();
+
+                if (i === 0) {
+                  const isFinded = arr.some(c => c.name === category);
+                  if (isFinded === false) {
+                    arr.push({ name: category, level: i + 1 });
+                  }
+                } else {
+                  let parent = arrCategories[i - 1].trim();
+                  console.log(parent);
+
+                  if (parent.indexOf(',') !== -1) {
+                    parent = parent.split(',')[0];
+                    console.log(parent);
+                  }
+                  const child = category;
+                  const isParent = arr.some(c => c.name === parent);
+                  const isChild = arr.some(c => c.name === child);
+                  if (isParent === false) {
+                    arr.push({ name: parent, level: i + 1 });
+                  }
+                  if (isChild === false) {
+                    console.log('>', arrStr);
+                    arr.push({ name: child, parentName: parent, level: i + 1 });
+                  }
                 }
               }
             });
